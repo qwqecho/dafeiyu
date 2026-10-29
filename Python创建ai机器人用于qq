@@ -1,0 +1,61 @@
+from fastapi import FastAPI, Request
+import httpx
+import json
+
+app = FastAPI()
+
+# 这是你自己的模型接口，也可以换成 OpenAI / DeepSeek / Qwen
+MODEL_API = "https://api.example.com/v1/chat/completions"
+API_KEY = "你的key"
+
+# 这是 QQ Bot 的回发接口
+QQ_API = "http://127.0.0.1:5700/send_private_msg"
+
+def call_ai(prompt: str):
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": "gpt-4o-mini",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.7
+    }
+    r = httpx.post(MODEL_API, headers=headers, json=payload, timeout=60)
+    r.raise_for_status()
+    data = r.json()
+    return data["choices"][0]["message"]["content"]
+
+@app.post("/qq")
+async def qq_event(request: Request):
+    data = await request.json()
+
+    # 只处理消息事件
+    if data.get("post_type") != "message":
+        return {"status": "ok"}
+
+    msg = data.get("message", "")
+    user_id = data.get("user_id")
+    message_type = data.get("message_type")  # private/group
+
+    # 这里可以写简单的会话管理
+    reply = call_ai(msg)
+
+    # 发回 QQ
+    payload = {
+        "user_id": user_id,
+        "message": reply
+    }
+
+    if message_type == "group":
+        payload = {
+            "group_id": data.get("group_id"),
+            "message": reply
+        }
+        qq_url = "http://127.0.0.1:5700/send_group_msg"
+    else:
+        qq_url = "http://127.0.0.1:5700/send_private_msg"
+
+    httpx.post(qq_url, json=payload, timeout=20)
+
+    return {"status": "ok"}
